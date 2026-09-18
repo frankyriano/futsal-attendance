@@ -283,7 +283,6 @@ export default function Home() {
   const [data, setData] = useState<Data>(initialData);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
-  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
   const requestVersion = useRef(0);
@@ -308,13 +307,13 @@ export default function Home() {
     const response = await fetch("/api/data", {
       method: command ? "POST" : "GET",
       cache: "no-store",
-      headers: { "Content-Type": "application/json", "x-team-password": password },
+      headers: { "Content-Type": "application/json" },
       ...(command ? { body: JSON.stringify(command) } : {}),
     });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || "通信に失敗しました。");
     return body;
-  }, [password]);
+  }, []);
   const load = useCallback(async () => {
     const version = ++requestVersion.current;
     const restored = await requestData() as Data;
@@ -344,6 +343,15 @@ export default function Home() {
       setBusy(false);
     }
   };
+  useEffect(() => {
+    let cancelled = false;
+    void load().then(() => {
+      if (!cancelled) setReady(true);
+    }).catch((e) => {
+      if (!cancelled) setError(e instanceof Error ? e.message : "通信に失敗しました。");
+    });
+    return () => { cancelled = true; };
+  }, [load]);
   useEffect(() => {
     if (!ready) return;
     const refresh = () => {
@@ -471,26 +479,11 @@ export default function Home() {
             </button>
           </div>
           {!ready && (
-            <form className="roster-panel" onSubmit={async (e) => {
-              e.preventDefault();
-              if (busy) return;
-              setBusy(true);
-              try {
-                await load();
-                setReady(true);
-              } catch (e) {
-                setError(e instanceof Error ? e.message : "通信に失敗しました。");
-              } finally { setBusy(false); }
-            }}>
-              <label className="field">
-                チームの合言葉
-                <input type="password" required disabled={busy} autoComplete="current-password"
-                  value={password} onChange={e => setPassword(e.target.value)} />
-              </label>
-              <button className="button primary" disabled={busy}>
-                {busy ? "接続中…" : "出欠表を開く"}
+            error ? (
+              <button className="button primary" onClick={() => window.location.reload()}>
+                再読み込み
               </button>
-            </form>
+            ) : <div className="info-banner" role="status">出席表を読み込み中…</div>
           )}
           {error && <div className="info-banner" role="alert">{error}</div>}
           {busy && ready && <div className="info-banner" role="status">保存中…</div>}

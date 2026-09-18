@@ -42,20 +42,19 @@ Supabase（PostgreSQL）にメンバー・開催日・出欠・追加した名�
 ```dotenv
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SECRET_KEY=取得したsecretキー
-TEAM_ACCESS_PASSWORD=チームで共有する長いランダムな英数字の合言葉
 ```
 
-5. `npm run dev`を起動（起動中なら再起動）し、合言葉を入力して出欠表を開きます。開催日とメンバーを登録してください。
+5. `npm run dev`を起動（起動中なら再起動）し、URLを開くとそのまま出席表が表示されます。開催日とメンバーを登録してください。
 
-秘密キーと合言葉はサーバーだけで使います。環境変数に `NEXT_PUBLIC_` を付けず、`.env.local`をコミットしないでください。RLSを有効にし、ブラウザ用の`anon`・`authenticated`ロールによる直接アクセスは許可していません。
+秘密キーはサーバーだけで使います。環境変数に `NEXT_PUBLIC_` を付けず、`.env.local`をコミットしないでください。RLSを有効にし、ブラウザ用の`anon`・`authenticated`ロールによる直接アクセスは許可していません。
 
-このアプリは1チーム用で、合言葉を知る人は全員の回答・メンバー・開催日を編集できます。個人アカウントや管理者権限は設けていません。合言葉はブラウザに保存せず、再読み込み時には再入力します。
+このアプリは1チーム用で、URLにアクセスできる人は全員の回答・メンバー・開催日を編集できます。個人アカウントや管理者権限は設けていません。
 
 ### Vercelでの設定
 
-Vercelのプロジェクト → Settings → Environment Variablesに、上記3つの環境変数を設定してデプロイします。変数を追加・変更した場合は再デプロイしてください。本番用とプレビュー用の環境変数の適用先を確認し、テストで本番データを変更したくない場合は別のSupabaseプロジェクトを使ってください。
+Vercelのプロジェクト → Settings → Environment Variablesに、上記2つの環境変数を設定してデプロイします。変数を追加・変更した場合は再デプロイしてください。本番用とプレビュー用の環境変数の適用先を確認し、テストで本番データを変更したくない場合は別のSupabaseプロジェクトを使ってください。
 
-確認方法：2つのブラウザで同じ合言葉を入力し、一方でメンバー・開催日・出欠を保存します。もう一方で10秒以内に反映されること、再読み込み後にも残ることを確認します。
+確認方法：2つのブラウザで同じURLを開き、一方でメンバー・開催日・出欠を保存します。もう一方で10秒以内に反映されること、再読み込み後にも残ることを確認します。
 
 参考：[Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys)、[Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)。
 

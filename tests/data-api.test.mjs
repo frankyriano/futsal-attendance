@@ -23,12 +23,11 @@ const { GET, POST } = loadTS("app/api/data/route.ts", { "@/lib/data": dataModule
 const originalFetch = global.fetch;
 const originalEnv = { ...process.env };
 const id = "12345678-1234-4234-8234-123456789abc";
-const headers = { "x-team-password": "test-team-password", "Content-Type": "application/json" };
+const headers = { "Content-Type": "application/json" };
 let calls;
 beforeEach(() => {
   process.env.SUPABASE_URL = "https://example.supabase.co";
   process.env.SUPABASE_SECRET_KEY = "sb_secret_test_only";
-  process.env.TEAM_ACCESS_PASSWORD = "test-team-password";
   calls = [];
   global.fetch = async (...args) => {
     calls.push(args);
@@ -37,7 +36,7 @@ beforeEach(() => {
 });
 after(() => {
   global.fetch = originalFetch;
-  for (const key of ["SUPABASE_URL", "SUPABASE_SECRET_KEY", "TEAM_ACCESS_PASSWORD"]) {
+  for (const key of ["SUPABASE_URL", "SUPABASE_SECRET_KEY"]) {
     if (originalEnv[key] === undefined) delete process.env[key];
     else process.env[key] = originalEnv[key];
   }
@@ -49,10 +48,14 @@ test("missing setup fails closed without querying the database", async () => {
   assert.equal((await GET(new Request("http://localhost/api/data", { headers }))).status, 503);
   assert.equal(calls.length, 0);
 });
-test("incorrect password blocks both reads and writes", async () => {
-  assert.equal((await GET(new Request("http://localhost/api/data"))).status, 401);
-  assert.equal((await POST(new Request("http://localhost/api/data", { method: "POST" }))).status, 401);
-  assert.equal(calls.length, 0);
+test("reads and writes succeed without authentication", async () => {
+  global.fetch = async (...args) => {
+    calls.push(args);
+    return Response.json(args[1]?.method === "POST" ? [{ id }] : { members: [], events: [] });
+  };
+  assert.equal((await GET()).status, 200);
+  assert.equal((await post({ type: "save-member", id, editing: false, name: "新メンバー" })).status, 200);
+  assert.equal(calls.length, 2);
 });
 test("invalid dates, IDs and oversized answers are rejected before writes", async () => {
   for (const command of [null, { type: "delete-member", id: "m1" },
