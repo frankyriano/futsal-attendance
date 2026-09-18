@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FUTSAL NOTE
 
-## Getting Started
+スマートフォンを中心に使えるフットサル出席管理アプリです。Next.js App Router / React / TypeScript で実装しています。
 
-First, run the development server:
+## 起動
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+http://localhost:3000 を開いてください。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 機能
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- 月ごとのカレンダーで開催日を選択・追加・削除（日付のみ）
+- 画面下部の「メンバー登録・編集」から固定メンバーの追加・名前の編集・削除
+- 開催日ごとの ○ / × 表示（出席・欠席、未回答は空欄）、出欠による絞り込み
+- 編集モーダルで出欠・複数人の名前・本人を人数に含める切り替え・備考を編集
+- 連れを含めた出席人数、回答の最終更新日時
+- 開催日削除は画面下部の設定から行い、確認用の日付入力が必要。キャンセル時の編集破棄
 
-## Learn More
+一覧では出欠を変更できません。「編集」から変更し、「変更を保存」で確定します。
 
-To learn more about Next.js, take a look at the following resources:
+合計参加人数は、出席かつ「本人を含める」が有効な本人の人数と、追加した名前の人数の合計です。本人が欠席・未回答の場合でも、名前の追加・編集・削除ができ、追加した人は合計人数に含まれます。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+ブラウザを開くと、今日以降で最も近い開催日を自動選択します。今後の予定がない場合は最後の開催日を表示します。日付の左右のボタンで前後の開催日へ移動でき、日付自体を押すとカレンダーを開きます。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## データ
 
-## Deploy on Vercel
+バックエンド接続はありません。初回は12人の固定メンバーと4件の開催日のモックデータを表示します。変更内容はブラウザの `localStorage`（キー：`futsal-note-v1`）に保存します。別の端末・ブラウザとは共有されません。初期状態に戻す場合は、このキーをブラウザの開発者ツールから削除して再読み込みしてください。
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 検証
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run lint
+npm run build
+```
+
+Turbopack の子プロセスがポートを使用できない制限環境では、以下の方法でもビルドできます。
+
+```bash
+npm run build -- --webpack
+```
