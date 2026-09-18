@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import type { Answer, Command, Data, Event, Member, Status } from "@/lib/data";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 
-type Status = "出席" | "欠席" | "未回答";
 function StatusMark({ status }: { status: Status }) {
   if (status === "未回答") return null;
   return (
@@ -26,20 +26,6 @@ function StatusMark({ status }: { status: Status }) {
     </svg>
   );
 }
-type Member = { id: string; name: string };
-type Answer = {
-  status: Status;
-  includeSelf: boolean;
-  guests: string[];
-  note: string;
-  updatedAt: string;
-};
-type Event = {
-  id: string;
-  date: string;
-  answers: Record<string, Answer>;
-};
-type Data = { members: Member[]; events: Event[] };
 const emptyAnswer = (): Answer => ({
   status: "未回答",
   includeSelf: true,
@@ -47,64 +33,7 @@ const emptyAnswer = (): Answer => ({
   note: "",
   updatedAt: "",
 });
-const names = [
-  "田中 健太",
-  "佐藤 翔太",
-  "鈴木 大輔",
-  "高橋 悠斗",
-  "伊藤 拓也",
-  "渡辺 直樹",
-  "山本 涼",
-  "中村 誠",
-  "小林 俊介",
-  "加藤 亮",
-  "吉田 和也",
-  "山田 雄介",
-];
-const initialData: Data = {
-  members: names.map((name, i) => ({ id: `m${i}`, name })),
-  events: [
-    {
-      id: "e1",
-      date: "2026-09-26",
-      answers: Object.fromEntries(
-        names.map((_, i) => [
-          `m${i}`,
-          {
-            status: i < 7 ? "出席" : i < 9 ? "欠席" : "未回答",
-            includeSelf: true,
-            guests:
-              i === 0 ? ["田中 祐介", "松本 翼"] : i === 3 ? ["高橋 健"] : [],
-            note:
-              i === 0
-                ? "友人2人と一緒に参加します！"
-                : i === 2
-                  ? "少し遅れて参加します。"
-                  : i === 7
-                    ? "仕事のためお休みします。"
-                    : "",
-            updatedAt: i < 9 ? "2026-09-18T21:30:00+09:00" : "",
-          },
-        ]),
-      ),
-    },
-    {
-      id: "e2",
-      date: "2026-10-03",
-      answers: {},
-    },
-    {
-      id: "e3",
-      date: "2026-10-10",
-      answers: {},
-    },
-    {
-      id: "e4",
-      date: "2026-09-12",
-      answers: {},
-    },
-  ],
-};
+const initialData: Data = { members: [], events: [] };
 const uid = () => crypto.randomUUID();
 const dateParts = (date: string) => {
   const d = new Date(`${date}T12:00:00`);
@@ -353,8 +282,12 @@ function CalendarPicker({
 export default function Home() {
   const [data, setData] = useState<Data>(initialData);
   const [ready, setReady] = useState(false);
-  const [storageError, setStorageError] = useState(false);
-  const [selected, setSelected] = useState("e1");
+  const [error, setError] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const saving = useRef(false);
+  const requestVersion = useRef(0);
+  const [selected, setSelected] = useState("");
   const [filter, setFilter] = useState<"すべて" | Status>("すべて");
   const [modal, setModal] = useState<
     "event" | "member" | "answer" | "calendar" | null
@@ -371,69 +304,59 @@ export default function Home() {
     name: string;
     date?: string;
   } | null>(null);
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      let restored = initialData;
-      try {
-        const raw = localStorage.getItem("futsal-note-v1");
-        if (raw) {
-          const saved = JSON.parse(raw);
-          if (Array.isArray(saved.members) && Array.isArray(saved.events)) {
-            restored = {
-              ...saved,
-              events: saved.events.map((e: Event) => ({
-                id: e.id,
-                date: e.date,
-                answers: Object.fromEntries(
-                  Object.entries(e.answers).map(([id, raw]) => {
-                    const a = raw as Answer & { guestCount?: number };
-                    return [
-                      id,
-                      {
-                        status: a.status,
-                        includeSelf: a.includeSelf,
-                        guests: Array.isArray(a.guests)
-                          ? a.guests
-                          : Array.from(
-                              {
-                                length:
-                                  Number.isInteger(a.guestCount) &&
-                                  (a.guestCount ?? 0) >= 0
-                                    ? a.guestCount!
-                                    : 0,
-                              },
-                              () => "",
-                            ),
-                        note: a.note,
-                        updatedAt: a.updatedAt,
-                      },
-                    ];
-                  }),
-                ),
-              })),
-            };
-          }
-        }
-      } catch {
-        setStorageError(true);
-      }
-      setData(restored);
-      setSelected(
-        openingEventId(restored.events, new Date().toLocaleDateString("sv-SE")),
-      );
-      setReady(true);
+  const requestData = useCallback(async (command?: Command): Promise<Data | { ok: true }> => {
+    const response = await fetch("/api/data", {
+      method: command ? "POST" : "GET",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", "x-team-password": password },
+      ...(command ? { body: JSON.stringify(command) } : {}),
     });
-    return () => cancelAnimationFrame(frame);
-  }, []);
-  useEffect(() => {
-    if (ready) {
-      try {
-        localStorage.setItem("futsal-note-v1", JSON.stringify(data));
-      } catch {
-        queueMicrotask(() => setStorageError(true));
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "通信に失敗しました。");
+    return body;
+  }, [password]);
+  const load = useCallback(async () => {
+    const version = ++requestVersion.current;
+    const restored = await requestData() as Data;
+    if (version !== requestVersion.current) return;
+    setData(restored);
+    setSelected(current => restored.events.some(e => e.id === current)
+      ? current : openingEventId(restored.events, new Date().toLocaleDateString("sv-SE")));
+    setError("");
+  }, [requestData]);
+  const save = async (command: Command) => {
+    if (saving.current) return false;
+    saving.current = true;
+    ++requestVersion.current;
+    setBusy(true);
+    setError("");
+    try {
+      await requestData(command);
+      try { await load(); } catch {
+        setError("保存は完了しましたが、最新データを取得できませんでした。再読み込みしてください。");
       }
+      return true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "通信に失敗しました。再度お試しください。");
+      return false;
+    } finally {
+      saving.current = false;
+      setBusy(false);
     }
-  }, [data, ready]);
+  };
+  useEffect(() => {
+    if (!ready) return;
+    const refresh = () => {
+      if (saving.current || document.hidden) return;
+      void load().catch(() => setError("最新データを取得できませんでした。通信状況を確認してください。"));
+    };
+    const timer = setInterval(refresh, 10000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [ready, load]);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 3500);
@@ -495,7 +418,7 @@ export default function Home() {
             <div className="event-switcher">
               <button
                 className="icon-button previous-month"
-                disabled={!ready || eventIndex <= 0}
+                disabled={!ready || busy || eventIndex <= 0}
                 aria-label="前の開催日"
                 onClick={() => chooseEvent(sortedEvents[eventIndex - 1].id)}
               >
@@ -503,7 +426,7 @@ export default function Home() {
               </button>
               <button
                 className="date-picker-button"
-                disabled={!ready}
+                disabled={!ready || busy}
                 aria-label="開催日を選択"
                 aria-haspopup="dialog"
                 onClick={() => setModal("calendar")}
@@ -523,7 +446,7 @@ export default function Home() {
               <button
                 className="icon-button"
                 disabled={
-                  !ready ||
+                  !ready || busy ||
                   eventIndex < 0 ||
                   eventIndex >= sortedEvents.length - 1
                 }
@@ -535,7 +458,7 @@ export default function Home() {
             </div>
             <button
               className="button primary add-event"
-              disabled={!ready}
+              disabled={!ready || busy}
               aria-label="開催日を追加"
               title="開催日を追加"
               onClick={() => {
@@ -547,11 +470,31 @@ export default function Home() {
               <Icon name="plus" size={20} />
             </button>
           </div>
-          {storageError && (
-            <div className="info-banner" role="alert">
-              ブラウザに保存できませんでした。現在の変更は再読み込みすると失われる場合があります。
-            </div>
+          {!ready && (
+            <form className="roster-panel" onSubmit={async (e) => {
+              e.preventDefault();
+              if (busy) return;
+              setBusy(true);
+              try {
+                await load();
+                setReady(true);
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "通信に失敗しました。");
+              } finally { setBusy(false); }
+            }}>
+              <label className="field">
+                チームの合言葉
+                <input type="password" required disabled={busy} autoComplete="current-password"
+                  value={password} onChange={e => setPassword(e.target.value)} />
+              </label>
+              <button className="button primary" disabled={busy}>
+                {busy ? "接続中…" : "出欠表を開く"}
+              </button>
+            </form>
           )}
+          {error && <div className="info-banner" role="alert">{error}</div>}
+          {busy && ready && <div className="info-banner" role="status">保存中…</div>}
+          <fieldset className="attendance-controls" hidden={!ready} disabled={!ready || busy}>
           {event ? (
             <section className="attendance-section">
               <div className="members-panel">
@@ -673,7 +616,7 @@ export default function Home() {
               <div className="member-settings-heading">
                 <button
                   className="button primary"
-                  disabled={!ready}
+                  disabled={!ready || busy}
                   onClick={() => {
                     setEditing(null);
                     setMemberName("");
@@ -746,6 +689,7 @@ export default function Home() {
               </div>
             </details>
           )}
+          </fieldset>
           <footer className="page-footer">
             <span className="footer-brand">
               <Icon name="ball" size={16} />
@@ -775,8 +719,8 @@ export default function Home() {
       )}
       {modal === "event" && (
         <Modal title="開催日を追加" onClose={close}>
-          <form
-            onSubmit={(e) => {
+          <form aria-busy={busy}
+            onSubmit={async (e) => {
               e.preventDefault();
               const form = new FormData(e.currentTarget);
               const next: Event = {
@@ -784,7 +728,7 @@ export default function Home() {
                 date: String(form.get("date")),
                 answers: {},
               };
-              setData({ ...data, events: [...data.events, next] });
+              if (!await save({ type: "add-event", id: next.id, date: next.date })) return;
               setSelected(next.id);
               setFilter("すべて");
               close();
@@ -795,6 +739,7 @@ export default function Home() {
               開催日
               <input type="date" name="date" required defaultValue={today} />
             </label>
+            {error && <p role="alert" className="form-help">{error}</p>}
             <div className="modal-actions">
               <button
                 type="button"
@@ -803,7 +748,7 @@ export default function Home() {
               >
                 キャンセル
               </button>
-              <button className="button primary" type="submit">
+              <button className="button primary" type="submit" disabled={busy}>
                 開催日を追加
               </button>
             </div>
@@ -815,21 +760,12 @@ export default function Home() {
           title={editing ? "メンバーを編集" : "メンバーを追加"}
           onClose={close}
         >
-          <form
-            onSubmit={(e) => {
+          <form aria-busy={busy}
+            onSubmit={async (e) => {
               e.preventDefault();
               if (!memberName.trim()) return;
               if (!editing) setFilter("すべて");
-              setData({
-                ...data,
-                members: editing
-                  ? data.members.map((m) =>
-                      m.id === editing.id
-                        ? { ...m, name: memberName.trim() }
-                        : m,
-                    )
-                  : [...data.members, { id: uid(), name: memberName.trim() }],
-              });
+              if (!await save({ type: "save-member", id: editing?.id ?? uid(), name: memberName.trim(), editing: !!editing })) return;
               close();
               setNotice(
                 editing ? "メンバーを更新しました" : "メンバーを追加しました",
@@ -850,6 +786,7 @@ export default function Home() {
             <p className="form-help">
               固定メンバーとして、すべての開催日に表示されます。
             </p>
+            {error && <p role="alert" className="form-help">{error}</p>}
             <div className="modal-actions">
               <button
                 type="button"
@@ -858,7 +795,7 @@ export default function Home() {
               >
                 キャンセル
               </button>
-              <button className="button primary" disabled={!memberName.trim()}>
+              <button className="button primary" disabled={busy || !memberName.trim()}>
                 保存する
               </button>
             </div>
@@ -867,8 +804,8 @@ export default function Home() {
       )}
       {modal === "answer" && editing && event && (
         <Modal title="出欠を編集" onClose={close}>
-          <form
-            onSubmit={(e) => {
+          <form aria-busy={busy}
+            onSubmit={async (e) => {
               e.preventDefault();
               const nextAnswer = {
                 ...answer,
@@ -877,17 +814,7 @@ export default function Home() {
                   : answer.guests,
                 updatedAt: new Date().toISOString(),
               };
-              setData({
-                ...data,
-                events: data.events.map((ev) =>
-                  ev.id === event.id
-                    ? {
-                        ...ev,
-                        answers: { ...ev.answers, [editing.id]: nextAnswer },
-                      }
-                    : ev,
-                ),
-              });
+              if (!await save({ type: "save-answer", eventId: event.id, memberId: editing.id, answer: nextAnswer })) return;
               close();
               setNotice(`${editing.name}の出欠を保存しました`);
             }}
@@ -1013,6 +940,7 @@ export default function Home() {
               />
             </label>
             <p className="form-help">最終更新：{updated(answer.updatedAt)}</p>
+            {error && <p role="alert" className="form-help">{error}</p>}
             <div className="modal-actions">
               <button
                 type="button"
@@ -1021,7 +949,7 @@ export default function Home() {
               >
                 キャンセル
               </button>
-              <button type="submit" className="button primary">
+              <button type="submit" className="button primary" disabled={busy}>
                 変更を保存
               </button>
             </div>
@@ -1071,6 +999,7 @@ export default function Home() {
               」を削除しますか？すべての開催日から、このメンバーの回答が削除されます。
             </p>
           )}
+          {error && <p role="alert" className="form-help">{error}</p>}
           <div className="modal-actions">
             <button
               className="button secondary"
@@ -1084,33 +1013,15 @@ export default function Home() {
             <button
               className="button danger"
               disabled={
-                confirmation.kind === "event" &&
-                deleteDate !== confirmation.date?.replaceAll("-", "")
+                busy || (confirmation.kind === "event" &&
+                deleteDate !== confirmation.date?.replaceAll("-", ""))
               }
-              onClick={() => {
+              onClick={async () => {
                 if (confirmation.kind === "event") {
-                  if (deleteDate !== confirmation.date?.replaceAll("-", ""))
-                    return;
-                  const remaining = data.events.filter(
-                    (e) => e.id !== confirmation.id,
-                  );
-                  setData({ ...data, events: remaining });
-                  if (selected === confirmation.id)
-                    setSelected(openingEventId(remaining, today));
+                  if (deleteDate !== confirmation.date?.replaceAll("-", "")) return;
+                  if (!await save({ type: "delete-event", id: confirmation.id, date: confirmation.date! })) return;
                 } else {
-                  setData({
-                    members: data.members.filter(
-                      (m) => m.id !== confirmation.id,
-                    ),
-                    events: data.events.map((e) => ({
-                      ...e,
-                      answers: Object.fromEntries(
-                        Object.entries(e.answers).filter(
-                          ([id]) => id !== confirmation.id,
-                        ),
-                      ),
-                    })),
-                  });
+                  if (!await save({ type: "delete-member", id: confirmation.id })) return;
                 }
                 setConfirmation(null);
                 setDeleteDate("");

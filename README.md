@@ -28,11 +28,41 @@ http://localhost:3000 を開いてください。
 
 ## データ
 
-バックエンド接続はありません。初回は12人の固定メンバーと4件の開催日のモックデータを表示します。変更内容はブラウザの `localStorage`（キー：`futsal-note-v1`）に保存します。別の端末・ブラウザとは共有されません。初期状態に戻す場合は、このキーをブラウザの開発者ツールから削除して再読み込みしてください。
+Supabase（PostgreSQL）にメンバー・開催日・出欠・追加した名前・備考を保存します。初期データは空です。以前の `localStorage` データは読み込まず、Supabaseに自動移行もしません。
+
+各操作は対象のレコードだけを更新します。メンバーや開催日を削除すると、関連する回答もデータベースで削除されます。ほかの人の変更は10秒ごと、および画面に戻ったときに取得します。同じ人の同じ開催日の回答を同時に編集した場合は、後から保存した内容が優先されます。
+
+### Supabaseの初期設定
+
+1. [Supabase](https://supabase.com/dashboard)でプロジェクトを作成します。
+2. SQL Editorで [`supabase/schema.sql`](supabase/schema.sql) の内容を一度実行します。空のテーブル3つと取得用の関数を作成します。
+3. プロジェクトの接続情報から Project URL、Settings → API Keysからsecret key（`sb_secret_...`）を取得します。Data APIを有効にし、`public`スキーマが公開対象であることを確認してください。
+4. `.env.example`を`.env.local`にコピーし、以下の値を設定します。
+
+```dotenv
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SECRET_KEY=取得したsecretキー
+TEAM_ACCESS_PASSWORD=チームで共有する長いランダムな英数字の合言葉
+```
+
+5. `npm run dev`を起動（起動中なら再起動）し、合言葉を入力して出欠表を開きます。開催日とメンバーを登録してください。
+
+秘密キーと合言葉はサーバーだけで使います。環境変数に `NEXT_PUBLIC_` を付けず、`.env.local`をコミットしないでください。RLSを有効にし、ブラウザ用の`anon`・`authenticated`ロールによる直接アクセスは許可していません。
+
+このアプリは1チーム用で、合言葉を知る人は全員の回答・メンバー・開催日を編集できます。個人アカウントや管理者権限は設けていません。合言葉はブラウザに保存せず、再読み込み時には再入力します。
+
+### Vercelでの設定
+
+Vercelのプロジェクト → Settings → Environment Variablesに、上記3つの環境変数を設定してデプロイします。変数を追加・変更した場合は再デプロイしてください。本番用とプレビュー用の環境変数の適用先を確認し、テストで本番データを変更したくない場合は別のSupabaseプロジェクトを使ってください。
+
+確認方法：2つのブラウザで同じ合言葉を入力し、一方でメンバー・開催日・出欠を保存します。もう一方で10秒以内に反映されること、再読み込み後にも残ることを確認します。
+
+参考：[Supabase API keys](https://supabase.com/docs/guides/getting-started/api-keys)、[Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)。
 
 ## 検証
 
 ```bash
+npm test
 npm run lint
 npm run build
 ```
