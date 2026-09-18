@@ -802,8 +802,46 @@ h3 {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
+}
+.member-drag-handle {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 7px;
+  background: #f3f6f3;
+  color: #6b806e;
+  font: inherit;
+  font-size: 24px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.member-drag-handle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.member-drag-handle:focus-visible {
+  outline: 2px solid var(--foreground);
+  outline-offset: 2px;
+}
+.roster-row.is-dragging {
+  background: #eef5ee;
+  opacity: 0.65;
+}
+.roster-row.is-dragging .member-drag-handle {
+  cursor: grabbing;
+}
+.roster-row.drop-before {
+  box-shadow: inset 0 3px #427a4a;
+}
+.roster-row.drop-after {
+  box-shadow: inset 0 -3px #427a4a;
 }
 .roster-row strong {
+  flex: 1;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 .empty-state {

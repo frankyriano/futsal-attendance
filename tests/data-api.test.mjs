@@ -100,6 +100,37 @@ test("deletion requires matching event ID and confirmed date", async () => {
   assert.equal(url.searchParams.get("date"), "eq.2026-09-26");
   assert.equal(calls[0][1].method, "DELETE");
 });
+test("member order is saved in one RPC without modifying names or answers", async () => {
+  const secondId = "87654321-4321-4321-8321-cba987654321";
+  const ids = [secondId, id];
+  global.fetch = async (...args) => { calls.push(args); return Response.json(ids); };
+  assert.equal((await post({ type: "reorder-members", ids })).status, 200);
+  assert.equal(calls.length, 1);
+  assert.match(String(calls[0][0]), /\/rpc\/reorder_futsal_members$/);
+  assert.deepEqual(JSON.parse(calls[0][1].body), { member_ids: ids });
+});
+test("invalid member orders are rejected before database access", async () => {
+  for (const ids of [[], [id, id], [id, id.toUpperCase()], ["invalid"], null, "invalid"]) {
+    assert.equal((await post({ type: "reorder-members", ids })).status, 400);
+  }
+  assert.equal(calls.length, 0);
+});
+test("membership changes reject stale ordering without reporting success", async () => {
+  global.fetch = async () => Response.json({ code: "40001", message: "Membership changed" }, { status: 400 });
+  const response = await post({ type: "reorder-members", ids: [id] });
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).error, /再読み込み/);
+});
+test("missing order function or column gives actionable setup error", async () => {
+  for (const code of ["PGRST202", "42883", "42703"]) {
+    global.fetch = async () => Response.json({ code, message: "private database detail" }, { status: 400 });
+    const response = await post({ type: "reorder-members", ids: [id] });
+    assert.equal(response.status, 503);
+    const message = (await response.json()).error;
+    assert.match(message, /追加設定SQL/);
+    assert.doesNotMatch(message, /private database detail/);
+  }
+});
 test("database errors do not expose private details or report success", async () => {
   global.fetch = async () => Response.json({ message: "private database detail" }, { status: 500 });
   const response = await post({ type: "save-member", id, editing: false, name: "新メンバー" });

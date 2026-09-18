@@ -1,35 +1,8 @@
--- Run once in the Supabase SQL Editor. No sample data is inserted.
+-- Existing projects: run in the Supabase SQL Editor. Preserves members and answers.
 begin;
+alter table public.members add column if not exists position bigint not null default 2147483647 check (position >= 0);
 
-create table public.members (
-  id uuid primary key,
-  name text not null check (length(trim(name)) between 1 and 60),
-  position bigint not null default 2147483647 check (position >= 0),
-  created_at timestamptz not null default now()
-);
-create table public.events (
-  id uuid primary key,
-  date date not null,
-  created_at timestamptz not null default now()
-);
-create table public.answers (
-  event_id uuid not null references public.events(id) on delete cascade,
-  member_id uuid not null references public.members(id) on delete cascade,
-  status text not null check (status in ('出席', '欠席', '未回答')),
-  include_self boolean not null default true,
-  guests text[] not null default '{}',
-  note text not null default '' check (length(note) <= 500),
-  updated_at timestamptz not null default now(),
-  primary key (event_id, member_id),
-  check (cardinality(guests) <= 100)
-);
-alter table public.members enable row level security;
-alter table public.events enable row level security;
-alter table public.answers enable row level security;
-revoke all on public.members, public.events, public.answers from anon, authenticated;
-grant select, insert, update, delete on public.members, public.events, public.answers to service_role;
-
-create function public.get_futsal_data() returns jsonb
+create or replace function public.get_futsal_data() returns jsonb
 language sql stable security invoker set search_path = '' as $$
   select jsonb_build_object(
     'members', coalesce((select jsonb_agg(jsonb_build_object('id', m.id, 'name', m.name) order by m.position, m.created_at, m.id) from public.members m), '[]'::jsonb),
@@ -44,6 +17,7 @@ language sql stable security invoker set search_path = '' as $$
 $$;
 revoke all on function public.get_futsal_data() from public, anon, authenticated;
 grant execute on function public.get_futsal_data() to service_role;
+
 
 -- Save the entire order atomically; reject lists made before membership changes.
 create or replace function public.reorder_futsal_members(member_ids uuid[]) returns setof uuid
@@ -64,4 +38,5 @@ end;
 $$;
 revoke all on function public.reorder_futsal_members(uuid[]) from public, anon, authenticated;
 grant execute on function public.reorder_futsal_members(uuid[]) to service_role;
+
 commit;

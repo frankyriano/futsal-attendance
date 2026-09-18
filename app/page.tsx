@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { Answer, Command, Data, Event, Member, Status } from "@/lib/data";
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type PointerEvent, type ReactNode } from "react";
 
 function StatusMark({ status }: { status: Status }) {
   if (status === "未回答") return null;
@@ -286,6 +286,8 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
   const requestVersion = useRef(0);
+  const drag = useRef<{ id: string; targetId: string; pointerId: number; startY: number; moved: boolean } | null>(null);
+  const [draggedMember, setDraggedMember] = useState<{ id: string; targetId: string } | null>(null);
   const [selected, setSelected] = useState("");
   const [filter, setFilter] = useState<"すべて" | Status>("すべて");
   const [modal, setModal] = useState<
@@ -355,7 +357,7 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     const refresh = () => {
-      if (saving.current || document.hidden) return;
+      if (saving.current || drag.current || document.hidden) return;
       void load().catch(() => setError("最新データを取得できませんでした。通信状況を確認してください。"));
     };
     const timer = setInterval(refresh, 10000);
@@ -379,6 +381,63 @@ export default function Home() {
   const chooseEvent = (id: string) => {
     setSelected(id);
     setFilter("すべて");
+  };
+  const moveMember = async (id: string, position: number) => {
+    if (busy || saving.current) return;
+    const previousMembers = data.members;
+    const ids = data.members.map(m => m.id);
+    const current = ids.indexOf(id);
+    if (current < 0 || current === position || position < 0 || position >= ids.length) return;
+    ids.splice(current, 1);
+    ids.splice(position, 0, id);
+    const members = [...previousMembers];
+    const [member] = members.splice(current, 1);
+    members.splice(position, 0, member);
+    setData(currentData => ({ ...currentData, members }));
+    if (await save({ type: "reorder-members", ids })) {
+      setNotice("メンバーの表示順を保存しました");
+    } else {
+      setData(currentData => ({ ...currentData, members: previousMembers }));
+    }
+  };
+  const startMemberDrag = (e: PointerEvent<HTMLButtonElement>, id: string) => {
+    if (busy || saving.current || data.members.length < 2 || !e.isPrimary || e.button !== 0) return;
+    ++requestVersion.current;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { id, targetId: id, pointerId: e.pointerId, startY: e.clientY, moved: false };
+    setDraggedMember({ id, targetId: id });
+  };
+  const updateMemberDrag = (e: PointerEvent<HTMLButtonElement>) => {
+    const current = drag.current;
+    if (!current || current.pointerId !== e.pointerId) return;
+    if (Math.abs(e.clientY - current.startY) > 5) current.moved = true;
+    if (!current.moved) return;
+    const rows = e.currentTarget.closest(".roster-panel")?.querySelectorAll<HTMLElement>("[data-member-id]");
+    if (!rows) return;
+    let distance = Infinity;
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect();
+      const nextDistance = Math.abs(e.clientY - (rect.top + rect.height / 2));
+      if (nextDistance < distance) {
+        distance = nextDistance;
+        current.targetId = row.dataset.memberId!;
+      }
+    }
+    setDraggedMember({ id: current.id, targetId: current.targetId });
+    if (e.clientY < 60) window.scrollBy(0, -16);
+    else if (e.clientY > window.innerHeight - 60) window.scrollBy(0, 16);
+  };
+  const cancelMemberDrag = () => {
+    drag.current = null;
+    setDraggedMember(null);
+  };
+  const finishMemberDrag = (e: PointerEvent<HTMLButtonElement>) => {
+    const current = drag.current;
+    if (!current || current.pointerId !== e.pointerId) return;
+    updateMemberDrag(e);
+    cancelMemberDrag();
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    if (current.moved) void moveMember(current.id, data.members.findIndex(m => m.id === current.targetId));
   };
   const lastUpdate = event
     ? Object.values(event.answers)
@@ -620,8 +679,35 @@ export default function Home() {
                   メンバーを登録
                 </button>
               </div>
-              {data.members.map((m) => (
-                <div className="roster-row" key={m.id}>
+              {!!data.members.length && <p className="form-help" id="member-drag-help">左の「⋮⋮」をつかんで上下にドラッグすると、行を移動できます。表示順はすべての開催日で共通です。キーボードでは上下の矢印キーで移動できます。</p>}
+              {error && <p className="info-banner" role="alert">{error}</p>}
+              {busy && <p className="form-help" role="status">保存中…</p>}
+              {data.members.map((m, index) => (
+                <div
+                  className={`roster-row${draggedMember?.id === m.id ? " is-dragging" : ""}${draggedMember?.targetId === m.id && draggedMember.id !== m.id ? (index < data.members.findIndex(member => member.id === draggedMember.id) ? " drop-before" : " drop-after") : ""}`}
+                  key={m.id}
+                  data-member-id={m.id}
+                >
+                  <button
+                    type="button"
+                    className="member-drag-handle"
+                    aria-label={`${m.name}の行を移動`}
+                    aria-describedby="member-drag-help"
+                    disabled={busy || data.members.length < 2}
+                    onPointerDown={e => startMemberDrag(e, m.id)}
+                    onPointerMove={updateMemberDrag}
+                    onPointerUp={finishMemberDrag}
+                    onPointerCancel={cancelMemberDrag}
+                    onLostPointerCapture={cancelMemberDrag}
+                    onKeyDown={e => {
+                      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                        e.preventDefault();
+                        void moveMember(m.id, index + (e.key === "ArrowUp" ? -1 : 1));
+                      }
+                    }}
+                  >
+                    <span aria-hidden="true">⋮⋮</span>
+                  </button>
                   <strong>{m.name}</strong>
                   <div>
                     <button

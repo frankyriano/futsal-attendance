@@ -46,6 +46,15 @@ export async function POST(request: Request) {
           ? await db.from("members").update({ name: command.name.trim() }).eq("id", command.id).select("id")
           : await db.from("members").insert({ id: command.id, name: command.name.trim() }).select("id");
         break;
+      case "reorder-members":
+        result = await db.rpc("reorder_futsal_members", { member_ids: command.ids });
+        if (result.error && ["PGRST202", "42883", "42703"].includes(result.error.code)) {
+          return Response.json({ error: "表示順の保存設定が未完了です。Supabaseで並べ替え用の追加設定SQLを実行してください。" }, { status: 503 });
+        }
+        if (result.error?.code === "40001") {
+          return Response.json({ error: "メンバーが追加・削除されています。再読み込みして並べ替えてください。" }, { status: 409 });
+        }
+        break;
       case "save-answer": {
         const a: Answer = command.answer;
         result = await db.from("answers").upsert({ event_id: command.eventId, member_id: command.memberId, status: a.status, include_self: a.includeSelf, guests: a.guests, note: a.note, updated_at: new Date().toISOString() }, { onConflict: "event_id,member_id" }).select("event_id");

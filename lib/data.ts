@@ -16,6 +16,7 @@ export type Data = { members: Member[]; events: Event[] };
 export type Command =
   | { type: "add-event"; id: string; date: string }
   | { type: "save-member"; id: string; name: string; editing: boolean }
+  | { type: "reorder-members"; ids: string[] }
   | { type: "save-answer"; eventId: string; memberId: string; answer: Answer }
   | { type: "delete-event"; id: string; date: string }
   | { type: "delete-member"; id: string };
@@ -31,6 +32,8 @@ export function validCommand(value: unknown): value is Command {
       return uuid(c.id) && date(c.date);
     case "delete-member":
       return uuid(c.id);
+    case "reorder-members":
+      return Array.isArray(c.ids) && c.ids.length > 0 && c.ids.every(uuid) && new Set(c.ids.map(id => id.toLowerCase())).size === c.ids.length;
     case "save-member":
       return uuid(c.id) && typeof c.editing === "boolean" && typeof c.name === "string" && c.name.trim().length > 0 && c.name.length <= 60;
     case "save-answer": {
