@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { Answer, Command, Data, Event, Member, Status } from "@/lib/data";
+import { eventSelectionId, topNavigationEvents, type Answer, type Command, type Data, type Event, type Member, type Status } from "@/lib/data";
 import { useCallback, useEffect, useId, useRef, useState, type PointerEvent, type ReactNode } from "react";
 
 function StatusMark({ status }: { status: Status }) {
@@ -51,10 +51,6 @@ const total = (event: Event, members: Member[]) =>
       n + (event.answers[m.id] ? attendanceCount(event.answers[m.id]) : 0),
     0,
   );
-const openingEventId = (events: Event[], today: string) => {
-  const sorted = [...events].sort((a, b) => a.date.localeCompare(b.date));
-  return (sorted.find((e) => e.date >= today) ?? sorted.at(-1))?.id ?? "";
-};
 const updated = (value: string) =>
   value
     ? new Date(value).toLocaleString("ja-JP", {
@@ -119,6 +115,12 @@ function Icon({ name, size = 20 }: { name: string; size?: number }) {
         <path d="M12 11v6M12 7h.01" />
       </>
     ),
+    search: (
+      <>
+        <circle cx="11" cy="11" r="7" />
+        <path d="m16 16 5 5" />
+      </>
+    ),
   };
   return (
     <svg
@@ -141,10 +143,12 @@ function Modal({
   title,
   children,
   onClose,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -155,7 +159,7 @@ function Modal({
     <dialog
       ref={ref}
       aria-labelledby={titleId}
-      className="modal"
+      className={`modal ${className}`.trim()}
       onCancel={onClose}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -177,12 +181,14 @@ function CalendarPicker({
   members,
   selected,
   onSelect,
+  onAdd,
   onClose,
 }: {
   events: Event[];
   members: Member[];
   selected: string;
   onSelect: (id: string) => void;
+  onAdd: (date: string) => void;
   onClose: () => void;
 }) {
   const current = events.find((e) => e.id === selected);
@@ -244,13 +250,13 @@ function CalendarPicker({
           return (
             <button
               key={i}
-              disabled={!matches.length}
-              className={`calendar-day ${matches.some((e) => e.id === selected) ? "selected" : ""}`}
-              aria-label={`${year}年${monthNumber}月${day}日${matches.length ? "の開催日" : " 開催なし"}`}
+              className={`calendar-day${matches.length ? " has-event" : ""}${matches.some((e) => e.id === selected) ? " selected" : ""}`}
+              aria-label={`${year}年${monthNumber}月${day}日${matches.length ? "の開催日を表示" : "を開催日として追加"}`}
               aria-pressed={matches.some((e) => e.id === selected)}
               onClick={() => {
                 if (matches.length === 1) onSelect(matches[0].id);
-                else setDayChoices(matches);
+                else if (matches.length > 1) setDayChoices(matches);
+                else onAdd(date);
               }}
             >
               <span>{day}</span>
@@ -259,6 +265,7 @@ function CalendarPicker({
           );
         })}
       </div>
+      <p className="calendar-help">予定のない日を選ぶと、その日を開催日として追加できます。</p>
       {!events.some((e) => e.date.startsWith(month)) && (
         <p className="calendar-empty">この月の開催日はありません。</p>
       )}
@@ -285,17 +292,21 @@ export default function Home() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
+  const guestInputRef = useRef<HTMLInputElement>(null);
+  const selectedDateRef = useRef<HTMLButtonElement>(null);
   const requestVersion = useRef(0);
   const drag = useRef<{ id: string; targetId: string; pointerId: number; startY: number; moved: boolean } | null>(null);
   const [draggedMember, setDraggedMember] = useState<{ id: string; targetId: string } | null>(null);
   const [selected, setSelected] = useState("");
   const [filter, setFilter] = useState<"すべて" | Status>("すべて");
+  const [memberSearch, setMemberSearch] = useState("");
   const [modal, setModal] = useState<
     "event" | "member" | "answer" | "calendar" | null
   >(null);
   const [editing, setEditing] = useState<Member | null>(null);
   const [answer, setAnswer] = useState<Answer>(emptyAnswer());
   const [memberName, setMemberName] = useState("");
+  const [eventDate, setEventDate] = useState("");
   const [guestName, setGuestName] = useState("");
   const [notice, setNotice] = useState("");
   const [deleteDate, setDeleteDate] = useState("");
@@ -321,8 +332,7 @@ export default function Home() {
     const restored = await requestData() as Data;
     if (version !== requestVersion.current) return;
     setData(restored);
-    setSelected(current => restored.events.some(e => e.id === current)
-      ? current : openingEventId(restored.events, new Date().toLocaleDateString("sv-SE")));
+    setSelected(current => eventSelectionId(restored.events, new Date().toLocaleDateString("sv-SE"), current));
     setError("");
   }, [requestData]);
   const save = async (command: Command) => {
@@ -377,11 +387,20 @@ export default function Home() {
   const sortedEvents = [...data.events].sort((a, b) =>
     a.date.localeCompare(b.date),
   );
-  const eventIndex = sortedEvents.findIndex((e) => e.id === selected);
+  const visibleScheduleEvents = topNavigationEvents(sortedEvents, today);
+  const normalizedSearch = memberSearch.trim().normalize("NFKC").toLocaleLowerCase("ja-JP");
+  const visibleMembers = data.members.filter((member) => {
+    const matchesName = !normalizedSearch || member.name.normalize("NFKC").toLocaleLowerCase("ja-JP").includes(normalizedSearch);
+    const status = event?.answers[member.id]?.status ?? "未回答";
+    return matchesName && (filter === "すべて" || status === filter);
+  });
   const chooseEvent = (id: string) => {
     setSelected(id);
     setFilter("すべて");
   };
+  useEffect(() => {
+    selectedDateRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+  }, [selected]);
   const moveMember = async (id: string, position: number) => {
     if (busy || saving.current) return;
     const previousMembers = data.members;
@@ -451,9 +470,11 @@ export default function Home() {
     setGuestName("");
   };
   const addGuest = () => {
-    if (!guestName.trim()) return;
-    setAnswer({ ...answer, guests: [...answer.guests, guestName.trim()] });
+    const name = guestName.trim();
+    if (!name) return;
     setGuestName("");
+    setAnswer(current => ({ ...current, guests: [...current.guests, name] }));
+    guestInputRef.current?.focus();
   };
   const openAnswer = (member: Member) => {
     setEditing(member);
@@ -483,45 +504,26 @@ export default function Home() {
         <main>
           <div className="page-heading compact-heading">
             <div className="event-switcher">
-              <button
-                className="icon-button previous-month"
-                disabled={!ready || busy || eventIndex <= 0}
-                aria-label="前の開催日"
-                onClick={() => chooseEvent(sortedEvents[eventIndex - 1].id)}
-              >
-                <Icon name="arrow" size={17} />
-              </button>
-              <button
-                className="date-picker-button"
-                disabled={!ready || busy}
-                aria-label="開催日を選択"
-                aria-haspopup="dialog"
-                onClick={() => setModal("calendar")}
-              >
-                <span className="current-date">
-                  <small>
-                    {event ? `${event.date.slice(0, 4)}年 · 開催日` : "開催日"}
-                  </small>
-                  <strong>
-                    {event
-                      ? `${dateParts(event.date).month}月${dateParts(event.date).day}日（${dateParts(event.date).weekday}）`
-                      : "日付を選択"}
-                  </strong>
-                </span>
-                <Icon name="calendar" size={18} />
-              </button>
-              <button
-                className="icon-button"
-                disabled={
-                  !ready || busy ||
-                  eventIndex < 0 ||
-                  eventIndex >= sortedEvents.length - 1
-                }
-                aria-label="次の開催日"
-                onClick={() => chooseEvent(sortedEvents[eventIndex + 1].id)}
-              >
-                <Icon name="arrow" size={17} />
-              </button>
+              <div className="event-date-list" aria-label="開催日の一覧">
+                {visibleScheduleEvents.map((listedEvent) => {
+                  const parts = dateParts(listedEvent.date);
+                  const isSelected = listedEvent.id === selected;
+                  return (
+                    <button
+                      key={listedEvent.id}
+                      ref={isSelected ? selectedDateRef : undefined}
+                      className={`event-date-button${isSelected ? " selected" : ""}`}
+                      disabled={!ready || busy}
+                      aria-pressed={isSelected}
+                      onClick={() => chooseEvent(listedEvent.id)}
+                    >
+                      <small>{listedEvent.date.slice(0, 4)}年</small>
+                      <strong>{parts.month}月{parts.day}日（{parts.weekday}）</strong>
+                    </button>
+                  );
+                })}
+                {!sortedEvents.length && <span className="event-date-empty">開催日なし</span>}
+              </div>
             </div>
             <button
               className="button primary add-event"
@@ -531,6 +533,8 @@ export default function Home() {
               onClick={() => {
                 setEditing(null);
                 setMemberName("");
+                setEventDate(today);
+                setError("");
                 setModal("event");
               }}
             >
@@ -565,6 +569,17 @@ export default function Home() {
                       </h2>
                     </div>
                   </div>
+                  <label className="member-search">
+                    <Icon name="search" size={17} />
+                    <span className="sr-only">メンバー名を検索</span>
+                    <input
+                      type="search"
+                      value={memberSearch}
+                      onChange={(e) => setMemberSearch(e.target.value)}
+                      placeholder="メンバー名を検索"
+                      autoComplete="off"
+                    />
+                  </label>
                   <div className="filter-tabs" aria-label="出欠で絞り込み">
                     {(["すべて", "出席", "欠席", "未回答"] as const).map(
                       (f) => (
@@ -595,13 +610,7 @@ export default function Home() {
                   <span />
                 </div>
                 <div className="member-list">
-                  {data.members
-                    .filter(
-                      (m) =>
-                        filter === "すべて" ||
-                        (event.answers[m.id]?.status ?? "未回答") === filter,
-                    )
-                    .map((m) => {
+                  {visibleMembers.map((m) => {
                       const a = event.answers[m.id] ?? emptyAnswer();
                       const n = attendanceCount(a);
                       return (
@@ -611,7 +620,7 @@ export default function Home() {
                             {a.note && <p>{a.note}</p>}
                             {a.status === "出席" && !a.includeSelf && (
                               <small className="self-note">
-                                本人は人数に含めない
+                                本人は参加人数に含まれていません
                               </small>
                             )}
                           </div>
@@ -642,13 +651,9 @@ export default function Home() {
                         </div>
                       );
                     })}
-                  {!data.members.some(
-                    (m) =>
-                      filter === "すべて" ||
-                      (event.answers[m.id]?.status ?? "未回答") === filter,
-                  ) && (
+                  {!visibleMembers.length && (
                     <div className="empty-state">
-                      該当するメンバーはいません。
+                      {normalizedSearch ? `「${memberSearch.trim()}」に一致するメンバーはいません。` : "該当するメンバーはいません。"}
                     </div>
                   )}
                 </div>
@@ -794,6 +799,11 @@ export default function Home() {
             setFilter("すべて");
             close();
           }}
+          onAdd={(date) => {
+            setEventDate(date);
+            setError("");
+            setModal("event");
+          }}
         />
       )}
       {modal === "event" && (
@@ -801,12 +811,15 @@ export default function Home() {
           <form aria-busy={busy}
             onSubmit={async (e) => {
               e.preventDefault();
-              const form = new FormData(e.currentTarget);
               const next: Event = {
                 id: uid(),
-                date: String(form.get("date")),
+                date: eventDate,
                 answers: {},
               };
+              if (data.events.some(event => event.date === next.date)) {
+                setError("この開催日はすでに登録されています。");
+                return;
+              }
               if (!await save({ type: "add-event", id: next.id, date: next.date })) return;
               setSelected(next.id);
               setFilter("すべて");
@@ -816,9 +829,27 @@ export default function Home() {
           >
             <label className="field">
               開催日
-              <input type="date" name="date" required defaultValue={today} />
+              <span className="date-input-with-weekday">
+                <span aria-hidden="true">
+                  {eventDate
+                    ? `${eventDate.slice(0, 4)}年${dateParts(eventDate).month}月${dateParts(eventDate).day}日（${dateParts(eventDate).weekday}）`
+                    : "日付を選択"}
+                </span>
+                <Icon name="calendar" size={19} />
+                <input
+                  type="date"
+                  name="date"
+                  aria-label="開催日"
+                  required
+                  value={eventDate}
+                  onChange={(e) => {
+                    setEventDate(e.target.value);
+                    setError("");
+                  }}
+                />
+              </span>
             </label>
-            {error && <p role="alert" className="form-help">{error}</p>}
+            {error && <p role="alert" className="form-error">{error}</p>}
             <div className="modal-actions">
               <button
                 type="button"
@@ -882,8 +913,8 @@ export default function Home() {
         </Modal>
       )}
       {modal === "answer" && editing && event && (
-        <Modal title="出欠を編集" onClose={close}>
-          <form aria-busy={busy}
+        <Modal title="出欠を編集" onClose={close} className="answer-modal">
+          <form className="answer-form" aria-busy={busy}
             onSubmit={async (e) => {
               e.preventDefault();
               const nextAnswer = {
@@ -937,28 +968,26 @@ export default function Home() {
             </fieldset>
             <div className="attendance-form">
               {answer.status === "出席" && (
-                <button
-                  type="button"
-                  className={`self-toggle ${answer.includeSelf ? "selected" : ""}`}
-                  aria-label="本人を含める"
-                  aria-pressed={answer.includeSelf}
-                  onClick={() =>
-                    setAnswer({ ...answer, includeSelf: !answer.includeSelf })
-                  }
-                >
-                  本人：{answer.includeSelf ? "含める" : "含めない"}
-                </button>
+                <label className="self-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={answer.includeSelf}
+                    onChange={(e) => setAnswer({ ...answer, includeSelf: e.target.checked })}
+                  />
+                  <span>本人も参加人数に含める</span>
+                </label>
               )}
               <div className="name-editor">
                 <div className="guest-input">
                   <input
+                    ref={guestInputRef}
                     aria-label="追加する名前"
                     placeholder="名前"
                     maxLength={60}
                     value={guestName}
                     onChange={(e) => setGuestName(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") {
+                      if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                         e.preventDefault();
                         addGuest();
                       }
@@ -1012,7 +1041,7 @@ export default function Home() {
             <label className="field">
               備考<span className="optional">任意</span>
               <textarea
-                rows={3}
+                rows={2}
                 maxLength={500}
                 value={answer.note}
                 onChange={(e) => setAnswer({ ...answer, note: e.target.value })}

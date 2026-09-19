@@ -21,6 +21,26 @@ export type Command =
   | { type: "delete-event"; id: string; date: string }
   | { type: "delete-member"; id: string };
 
+export function eventSelectionId(events: Event[], today: string, current = "") {
+  if (events.some(event => event.id === current)) return current;
+  const sorted = [...events].sort((a, b) => a.date.localeCompare(b.date));
+  return (sorted.find(event => event.date >= today) ?? sorted.at(-1))?.id ?? "";
+}
+
+export function topNavigationEvents(events: Event[], today: string) {
+  const sorted = [...events].sort((a, b) => a.date.localeCompare(b.date));
+  const past = sorted.filter(event => event.date < today);
+  const todayAndFuture = sorted.filter(event => event.date >= today);
+  let visiblePast = past.slice(-2);
+  const visibleUpcoming = todayAndFuture.slice(0, 6 - visiblePast.length);
+  const remaining = 6 - visiblePast.length - visibleUpcoming.length;
+  if (remaining > 0) {
+    const earlierPast = past.slice(0, Math.max(0, past.length - visiblePast.length));
+    visiblePast = [...earlierPast.slice(-remaining), ...visiblePast];
+  }
+  return [...visiblePast, ...visibleUpcoming];
+}
+
 export function validCommand(value: unknown): value is Command {
   if (!value || typeof value !== "object") return false;
   const c = value as Record<string, unknown>;

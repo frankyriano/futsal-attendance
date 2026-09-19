@@ -19,6 +19,7 @@ function loadTS(file, dependencies = {}) {
   return mod.exports;
 }
 const dataModule = loadTS("lib/data.ts");
+const { eventSelectionId, topNavigationEvents } = dataModule;
 const { GET, POST } = loadTS("app/api/data/route.ts", { "@/lib/data": dataModule });
 const originalFetch = global.fetch;
 const originalEnv = { ...process.env };
@@ -42,6 +43,29 @@ after(() => {
   }
 });
 const post = body => POST(new Request("http://localhost/api/data", { method: "POST", headers, body: JSON.stringify(body) }));
+
+test("initial event selection prefers today, then future, then latest past", () => {
+  const events = [
+    { id: "past-old", date: "2026-09-10" },
+    { id: "past-new", date: "2026-09-18" },
+    { id: "today", date: "2026-09-19" },
+    { id: "future", date: "2026-09-21" },
+  ];
+  assert.equal(eventSelectionId(events, "2026-09-19"), "today");
+  assert.equal(eventSelectionId(events.filter(event => event.id !== "today"), "2026-09-19"), "future");
+  assert.equal(eventSelectionId(events.filter(event => event.date < "2026-09-19"), "2026-09-19"), "past-new");
+  assert.equal(eventSelectionId(events, "2026-09-19", "past-old"), "past-old");
+});
+test("top navigation shows six events and fills missing past or future slots", () => {
+  const dates = ["2026-09-01", "2026-09-10", "2026-09-18", "2026-09-19", "2026-09-20", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"];
+  const events = dates.map((date, index) => ({ id: String(index), date }));
+  assert.deepEqual(topNavigationEvents(events, "2026-09-19").map(event => event.date),
+    ["2026-09-10", "2026-09-18", "2026-09-19", "2026-09-20", "2026-09-21", "2026-09-22"]);
+  assert.deepEqual(topNavigationEvents(events.filter(event => event.date >= "2026-09-19"), "2026-09-19").map(event => event.date),
+    ["2026-09-19", "2026-09-20", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"]);
+  assert.deepEqual(topNavigationEvents(events, "2026-10-01").map(event => event.date),
+    ["2026-09-19", "2026-09-20", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"]);
+});
 
 test("missing setup fails closed without querying the database", async () => {
   delete process.env.SUPABASE_SECRET_KEY;
@@ -76,6 +100,23 @@ test("empty database is returned as empty lists using one uncached snapshot quer
   assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.equal(calls.length, 1);
   assert.match(String(calls[0][0]), /\/rpc\/get_futsal_data$/);
+});
+test("duplicate event dates return a clear conflict without exposing database details", async () => {
+  global.fetch = async () => Response.json({ code: "23505", message: "private constraint detail" }, { status: 409 });
+  const response = await post({ type: "add-event", id, date: "2026-09-26" });
+  assert.equal(response.status, 409);
+  const message = (await response.json()).error;
+  assert.match(message, /すでに登録/);
+  assert.doesNotMatch(message, /private constraint detail/);
+});
+test("weekday event dates can be added", async () => {
+  global.fetch = async (...args) => { calls.push(args); return Response.json([{ id }]); };
+  const response = await post({ type: "add-event", id, date: "2026-09-21" });
+  assert.equal(response.status, 200);
+  const [url, options] = calls[0];
+  assert.match(String(url), /\/events\?/);
+  assert.equal(options.method, "POST");
+  assert.deepEqual(JSON.parse(options.body), { id, date: "2026-09-21" });
 });
 test("answer writes only the selected member and event and uses server timestamp", async () => {
   global.fetch = async (...args) => { calls.push(args); return Response.json([{ event_id: id }]); };

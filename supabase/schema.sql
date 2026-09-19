@@ -1,6 +1,8 @@
 -- Run once in the Supabase SQL Editor. No sample data is inserted.
 begin;
 
+create extension if not exists pg_cron;
+
 create table public.members (
   id uuid primary key,
   name text not null check (length(trim(name)) between 1 and 60),
@@ -9,7 +11,7 @@ create table public.members (
 );
 create table public.events (
   id uuid primary key,
-  date date not null,
+  date date not null unique,
   created_at timestamptz not null default now()
 );
 create table public.answers (
@@ -64,4 +66,36 @@ end;
 $$;
 revoke all on function public.reorder_futsal_members(uuid[]) from public, anon, authenticated;
 grant execute on function public.reorder_futsal_members(uuid[]) to service_role;
+
+-- Keep the 30 most recent events before today (Japan time). Older events and
+-- their answers are deleted by a database job every three months.
+create or replace function public.cleanup_old_futsal_events() returns integer
+language plpgsql security definer set search_path = '' as $$
+declare
+  deleted_count integer;
+begin
+  delete from public.events event
+  where event.id in (
+    select old_event.id
+    from public.events old_event
+    where old_event.date < (pg_catalog.now() at time zone 'Asia/Tokyo')::date
+    order by old_event.date desc, old_event.created_at desc, old_event.id desc
+    offset 30
+  );
+  get diagnostics deleted_count = row_count;
+  return deleted_count;
+end;
+$$;
+revoke all on function public.cleanup_old_futsal_events() from public, anon, authenticated;
+
+select cron.schedule(
+  'cleanup-old-futsal-events',
+  '0 18 31 3,12 *',
+  $cron$select public.cleanup_old_futsal_events();$cron$
+);
+select cron.schedule(
+  'cleanup-old-futsal-events-june-september',
+  '0 18 30 6,9 *',
+  $cron$select public.cleanup_old_futsal_events();$cron$
+);
 commit;

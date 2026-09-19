@@ -40,6 +40,9 @@ export async function POST(request: Request) {
     switch (command.type) {
       case "add-event":
         result = await db.from("events").insert({ id: command.id, date: command.date }).select("id");
+        if (result.error?.code === "23505") {
+          return Response.json({ error: "この開催日はすでに登録されています。" }, { status: 409 });
+        }
         break;
       case "save-member":
         result = command.editing
