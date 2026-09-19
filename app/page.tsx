@@ -522,7 +522,7 @@ export default function Home() {
                     </button>
                   );
                 })}
-                {!sortedEvents.length && <span className="event-date-empty">開催日なし</span>}
+                {ready && !sortedEvents.length && <span className="event-date-empty">開催日なし</span>}
               </div>
             </div>
             <button
